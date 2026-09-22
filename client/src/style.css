@@ -1,0 +1,108 @@
+:root {
+  font-family: system-ui, -apple-system, sans-serif;
+  --gap: 12px;
+}
+body {
+  margin: 0;
+  padding: 16px;
+  background: #101418;
+  color: #e8edf2;
+}
+#app {
+  max-width: 720px;
+  margin: 0 auto;
+}
+h1 {
+  font-size: 1.4rem;
+}
+.card {
+  background: #1a2129;
+  border: 1px solid #2c3742;
+  border-radius: 10px;
+  padding: 14px;
+  margin: 12px 0;
+}
+.row {
+  display: flex;
+  gap: var(--gap);
+  flex-wrap: wrap;
+  align-items: end;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 120px;
+  flex: 1;
+}
+label {
+  font-size: 0.8rem;
+  color: #9fb0c0;
+}
+input,
+select,
+button {
+  font-size: 1rem;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #33404d;
+  background: #0f1419;
+  color: #e8edf2;
+}
+button {
+  cursor: pointer;
+  background: #2563eb;
+  border-color: #2563eb;
+}
+button.secondary {
+  background: transparent;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.room-code {
+  font-size: 2rem;
+  letter-spacing: 0.35em;
+  font-weight: 700;
+}
+.error {
+  color: #ff9a9a;
+  min-height: 1.2em;
+}
+.notice {
+  color: #9fd6a4;
+  min-height: 1.2em;
+}
+ul.players {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+ul.players li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #232c36;
+  flex-wrap: wrap;
+}
+.badge {
+  font-size: 0.75rem;
+  border: 1px solid #33404d;
+  border-radius: 20px;
+  padding: 1px 8px;
+  color: #9fb0c0;
+}
+.badge.seeker {
+  border-color: #eab308;
+  color: #eab308;
+}
+.badge.offline {
+  border-color: #7a2e2e;
+  color: #ff9a9a;
+}
+.hint {
+  font-size: 0.85rem;
+  color: #9fb0c0;
+}
