@@ -286,6 +286,8 @@ export function SeekView(): HTMLElement {
       if (guessPin && Math.abs(guessPin.lat - lat) < 1e-9 && Math.abs(guessPin.lng - lng) < 1e-9) {
         checkingPin = false;
         render();
+        // Show the pin's Street View right away — no extra click needed.
+        if (guessPanoId) showGuessPano(guessPanoId);
       }
     }
   }
@@ -328,16 +330,8 @@ export function SeekView(): HTMLElement {
       errorLine.textContent = 'Place a guess pin first.';
       return;
     }
-    // Refresh coverage, then show the pin's own panorama below the map.
-    void checkGuessPin(guessPin.lat, guessPin.lng).then(() => {
-      if (guessPanoId && guessPin) {
-        if (showGuessPano(guessPanoId)) {
-          noticeLine.textContent = 'Guess-pin Street View — compare with the hider above.';
-        }
-      } else if (!checkingPin) {
-        errorLine.textContent = 'No Street View near this guess pin — guesses still lock anywhere.';
-      }
-    });
+    // Re-run coverage (auto-displays the panorama when found).
+    void checkGuessPin(guessPin.lat, guessPin.lng);
   }
 
   async function doLock() {
