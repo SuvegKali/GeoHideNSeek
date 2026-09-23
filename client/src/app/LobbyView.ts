@@ -208,9 +208,13 @@ export function LobbyView(): HTMLElement {
   const isOwner = () => !!room && !!myId && room.ownerId === myId;
 
   function showError(target: HTMLElement, res: AckRes) {
-    target.textContent = res.code === 'NAME_TAKEN_REJOIN_AVAILABLE'
-      ? `${res.error} — use Rejoin.`
-      : (res.error ?? 'Something went wrong');
+    if (res.code === 'NAME_TAKEN_REJOIN_AVAILABLE') {
+      target.textContent = `${res.error} — use Rejoin.`;
+    } else if (res.code === 'ALREADY_CONNECTED') {
+      target.textContent = `${res.error} — if that's you on another tab or a sleeping phone, close it there, then Rejoin.`;
+    } else {
+      target.textContent = res.error ?? 'Something went wrong';
+    }
   }
 
   function setRoom(next: ClientRoom | null, player?: Player) {

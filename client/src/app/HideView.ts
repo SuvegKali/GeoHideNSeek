@@ -3,7 +3,7 @@ import { ensureSession, loadSession } from '../session';
 import { REGION_PRESETS } from '../regions';
 import { HIDER_OVERTIME_SEC, MapsError, debounce, loadMaps, panoExists } from '../maps';
 import { hidePhaseAt, hideRemainingSec } from '../hidePhase';
-import type { ClientRoom } from '../types';
+import type { ClientRoom, Guess } from '../types';
 import type { Socket } from 'socket.io-client';
 
 // The Maps JS objects we touch, structurally typed (no @types/google.maps dep).
@@ -67,6 +67,7 @@ export function HideView(): HTMLElement {
       </div>
       <div data-h="pano" style="height:220px;border-radius:8px;overflow:hidden;margin-top:12px;background:#0f1419"></div>
       <p class="hint" data-h="mates"></p>
+      <p class="hint" data-h="spy"></p>
       <p class="error" data-h="error"></p>
       <p class="notice" data-h="notice"></p>
     </div>`;
@@ -80,6 +81,7 @@ export function HideView(): HTMLElement {
   const controlsRow = q('[data-h="controls"]');
   const panoDiv = q('[data-h="pano"]');
   const matesLine = q('[data-h="mates"]');
+  const spyLine = q('[data-h="spy"]');
   const errorLine = q('[data-h="error"]');
   const noticeLine = q('[data-h="notice"]');
   const checkBtn = q<HTMLButtonElement>('[data-act="check"]');
@@ -92,6 +94,10 @@ export function HideView(): HTMLElement {
   const myName = () =>
     room?.players.find((p) => p.id === myId())?.name ?? loadSession()?.name ?? '';
   const amSeeker = () => !!room && !!myId() && room.settings.seekerId === myId();
+  const nameOf = (id: string) => room?.players.find((p) => p.id === id)?.name ?? 'a hider';
+  /** Latest seeker probe marker per target hider. */
+  let probes = new Map<string, any>();
+  let spyFeed = '';
 
   function phaseNow() {
     if (deadlineMs === null) return 'active' as const;
@@ -104,9 +110,10 @@ export function HideView(): HTMLElement {
 
   function render() {
     const seekerView = amSeeker();
+    const spectate = !!room && room.phase === 'SEEKING' && !seekerView && !previewMode;
     mapDiv.style.display = seekerView ? 'none' : '';
     pinLine.style.display = seekerView ? 'none' : '';
-    controlsRow.style.display = seekerView ? 'none' : '';
+    controlsRow.style.display = seekerView || spectate ? 'none' : '';
     panoDiv.style.display = seekerView ? 'none' : '';
     meLine.textContent = room && myName() ? `Playing as ${myName()}.` : '';
     if (seekerView) {
@@ -116,8 +123,17 @@ export function HideView(): HTMLElement {
           ? `Hiding ends in ${hideRemainingSec(Date.now(), deadlineMs, HIDER_OVERTIME_SEC)}s`
           : '';
       matesLine.textContent = room ? `${room.hideCount} hide(s) locked in this room.` : '';
+      spyLine.textContent = '';
       return;
     }
+    if (spectate) {
+      statusLine.textContent = 'Seeking live — watch the seeker work.';
+      timerLine.textContent = '';
+      matesLine.textContent = room ? `${room.hideCount} hide(s) locked in this room.` : '';
+      spyLine.textContent = spyFeed || 'Waiting for seeker moves…';
+      return;
+    }
+    spyLine.textContent = '';
     if (locked) {
       statusLine.textContent = 'Hide locked — good luck, seeker.';
     } else if (skipped) {
@@ -319,6 +335,33 @@ export function HideView(): HTMLElement {
     );
   }
 
+  function clearProbes() {
+    probes.forEach((m) => {
+      try {
+        m.setMap(null);
+      } catch {
+        // Ignore teardown errors.
+      }
+    });
+    probes = new Map();
+  }
+
+  /** Latest seeker probe per target hider, right on the hide map. */
+  function upsertProbe(targetId: string, at: { lat: number; lng: number }) {
+    if (!mapReady) return;
+    const maps = gmaps();
+    if (!maps) return;
+    try {
+      probes.get(targetId)?.setMap(null);
+      probes.set(
+        targetId,
+        new maps.Marker({ position: at, map, title: `Seeker probe (${nameOf(targetId)})`, label: 'S' }),
+      );
+    } catch {
+      // Ignore marker errors.
+    }
+  }
+
   el.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
     if (!btn) return;
@@ -347,6 +390,8 @@ export function HideView(): HTMLElement {
     skipped = false;
     panoId = null;
     frozenNoticed = false;
+    spyFeed = '';
+    clearProbes();
     deadlineMs = payload.deadlineMs;
     void ensureMap();
     render();
@@ -357,11 +402,49 @@ export function HideView(): HTMLElement {
   });
   socket.on('seeking:started', (payload: { roomCode: string }) => {
     if (payload.roomCode !== code() || previewMode) return;
-    el.hidden = true;
+    if (amSeeker()) {
+      el.hidden = true;
+      return;
+    }
+    // Hiders keep this view as the live situation room.
+    el.hidden = false;
+    spyFeed = 'Seeking is live — watch the seeker.';
+    render();
+  });
+  socket.on('seeker:viewing', (payload: { roomCode: string; targetHiderId: string }) => {
+    if (payload.roomCode !== code()) return;
+    spyFeed =
+      payload.targetHiderId === myId()
+        ? 'ALERT: the seeker is viewing YOUR hide right now!'
+        : `Seeker is viewing ${nameOf(payload.targetHiderId)}.`;
+    render();
+  });
+  socket.on(
+    'seeker:guessing',
+    (payload: { roomCode: string; targetHiderId: string; region: { lat: number; lng: number } }) => {
+      if (payload.roomCode !== code()) return;
+      upsertProbe(payload.targetHiderId, payload.region);
+      spyFeed =
+        `Seeker probing near ${payload.region.lat}, ${payload.region.lng} ` +
+        `for ${nameOf(payload.targetHiderId)}.`;
+      render();
+    },
+  );
+  socket.on('guess:locked', (payload: { roomCode: string; guess: Guess; tier: string }) => {
+    if (payload.roomCode !== code()) return;
+    const g = payload.guess;
+    probes.get(g.targetHiderId)?.setMap(null);
+    probes.delete(g.targetHiderId);
+    spyFeed =
+      `Seeker locked ${payload.tier} on ${nameOf(g.targetHiderId)}: ` +
+      `+${g.points} pts (${g.distanceKm.toFixed(2)} km).`;
+    render();
   });
   socket.on('round:ended', (payload: { roomCode: string }) => {
     if (payload.roomCode !== code() || previewMode) return;
     el.hidden = true;
+    spyFeed = '';
+    clearProbes();
   });
 
   setInterval(tick, 500);

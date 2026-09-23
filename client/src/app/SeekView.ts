@@ -380,9 +380,12 @@ export function SeekView(): HTMLElement {
     void ensureMap();
     render();
   });
-  socket.on('guess:locked', (payload: { roomCode: string; guess: Guess }) => {
+  socket.on('guess:locked', (payload: { roomCode: string; guess: Guess; tier: string }) => {
     if (payload.roomCode !== code()) return;
     guesses.set(payload.guess.targetHiderId, payload.guess);
+    activity =
+      `Seeker: ${payload.tier} on ${nameOf(payload.guess.targetHiderId)} ` +
+      `+${payload.guess.points} pts (${payload.guess.distanceKm.toFixed(2)} km).`;
     render();
   });
   socket.on('seeker:viewing', (payload: { roomCode: string; targetHiderId: string }) => {

@@ -254,8 +254,17 @@ export function joinRoom(code: string, displayName: string): { room: Room; playe
   return { room, player };
 }
 
-/** Rejoin keeps the same seat (id, team, score) and flips connected=true. */
-export function rejoinRoom(code: string, displayName: string): { room: Room; player: Player } {
+/**
+ * Rejoin keeps the same seat (id, team, score) and flips connected=true.
+ * With allowTakeover, a seat flagged connected may be re-claimed — the
+ * caller must first verify the holding socket is dead (ghost phone /
+ * dropped network), otherwise genuine duplicates would steal each other.
+ */
+export function rejoinRoom(
+  code: string,
+  displayName: string,
+  opts?: { allowTakeover?: boolean },
+): { room: Room; player: Player } {
   const room = getRoom(code);
   if (!room) throw new RoomError('ROOM_NOT_FOUND', `Room ${normalizeCode(code)} not found`);
   const nameErr = validateDisplayName(displayName);
@@ -263,7 +272,9 @@ export function rejoinRoom(code: string, displayName: string): { room: Room; pla
 
   const existing = findPlayerByName(room, displayName);
   if (!existing) throw new RoomError('NOT_IN_ROOM', `"${displayName.trim()}" has no seat in room ${room.code}`);
-  if (existing.connected) throw new RoomError('ALREADY_CONNECTED', `"${existing.name}" is already connected`);
+  if (existing.connected && !opts?.allowTakeover) {
+    throw new RoomError('ALREADY_CONNECTED', `"${existing.name}" is already connected`);
+  }
   existing.connected = true;
   return { room, player: existing };
 }

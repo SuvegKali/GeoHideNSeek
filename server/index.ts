@@ -12,6 +12,7 @@ import {
   assignTeam,
   closeRoom,
   createRoom,
+  findPlayerByName,
   getRoom,
   joinRoom,
   markDisconnected,
@@ -25,6 +26,7 @@ import {
   updateSettings,
   type ClientRoom,
   type Player,
+  type Room,
   type RoomSettings,
   type SeekerSelection,
 } from './rooms.js';
@@ -152,8 +154,12 @@ function startSeekerGrace(code: string, seeker: Player) {
 function attachSession(socket: Socket, code: string, playerId: string) {
   (socket.data as SocketCtx).roomCode = code;
   (socket.data as SocketCtx).playerId = playerId;
+  playerSocket.set(playerId, socket.id);
   socket.join(code);
 }
+
+/** Which live socket currently holds each seat (playerId → socket.id). */
+const playerSocket = new Map<string, string>();
 
 io.on('connection', (socket) => {
   socket.emit('hello', { id: socket.id });
@@ -187,20 +193,37 @@ io.on('connection', (socket) => {
   socket.on('rejoin', (payload: { code: string; name: string }, ack?: Ack) => {
     try {
       const { room, player } = rejoinRoom(payload?.code, payload?.name);
-      attachSession(socket, room.code, player.id);
-      // Seeker came back within grace → cancel the timeout.
-      if (room.settings.seekerId === player.id && seekerGraceTimers.has(room.code)) {
-        clearSeekerGrace(room.code);
-        io.to(room.code).emit('seeker:grace-cancelled', { roomCode: room.code, playerId: player.id });
-      }
-      const roomDto = toClientRoom(room);
-      ack?.({ ok: true, room: roomDto, player });
-      socket.to(room.code).emit('player:rejoined', { room: roomDto, player });
-      broadcastRoomState(room.code);
+      completeRejoin(socket, room, player, ack);
     } catch (e) {
+      // Ghost seat: the name is flagged connected but its socket is gone
+      // (phone sleep, network drop without a goodbye). Let this live
+      // socket claim it; a genuinely-connected duplicate stays rejected.
+      if (e instanceof RoomError && e.code === 'ALREADY_CONNECTED') {
+        const room = getRoom(payload?.code);
+        const existing = room && findPlayerByName(room, payload?.name ?? '');
+        const holder = existing && playerSocket.get(existing.id);
+        if (room && existing && (!holder || !io.sockets.sockets.has(holder))) {
+          existing.connected = true;
+          completeRejoin(socket, room, existing, ack);
+          return;
+        }
+      }
       ack?.(errPayload(e));
     }
   });
+
+  function completeRejoin(socket: Socket, room: Room, player: Player, ack?: Ack) {
+    attachSession(socket, room.code, player.id);
+    // Seeker came back within grace → cancel the timeout.
+    if (room.settings.seekerId === player.id && seekerGraceTimers.has(room.code)) {
+      clearSeekerGrace(room.code);
+      io.to(room.code).emit('seeker:grace-cancelled', { roomCode: room.code, playerId: player.id });
+    }
+    const roomDto = toClientRoom(room);
+    ack?.({ ok: true, room: roomDto, player });
+    socket.to(room.code).emit('player:rejoined', { room: roomDto, player });
+    broadcastRoomState(room.code);
+  }
 
   // Owner closes the room; everyone is notified. (Full owner-auth lands with lobby UI.)
   socket.on('closeRoom', (payload: { code: string }, ack?: Ack) => {
@@ -211,6 +234,7 @@ io.on('connection', (socket) => {
       if (ctx.playerId !== room.ownerId) throw new RoomError('NOT_OWNER', 'Only the owner can close the room');
       clearSeekerGrace(room.code);
       clearRoundTimer(room.code);
+      for (const pid of room.players.keys()) playerSocket.delete(pid);
       closeRoom(room.code);
       io.to(room.code).emit('room:closed', { roomCode: room.code });
       io.in(room.code).socketsLeave(room.code);
@@ -413,6 +437,8 @@ io.on('connection', (socket) => {
     const stored = room.players.get(ctx.playerId);
     // Already rejoined elsewhere (or never joined) → ignore stale disconnect.
     if (!stored || !stored.connected) return;
+    // A newer socket claimed this seat (takeover) → this goodbye is stale.
+    if (playerSocket.get(ctx.playerId) !== socket.id) return;
     try {
       const { player, wasSeeker } = markDisconnected(room, ctx.playerId);
       socket.to(room.code).emit('player:disconnected', {
